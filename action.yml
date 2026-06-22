@@ -5,6 +5,14 @@ inputs:
   enable_go:
     description: Whether to enable go specific features, such as caching.
     default: "true"
+  cache_key_suffix:
+    description: |
+      Suffix appended to the Go cache key to scope the cache per build flavor.
+      Jobs that compile with different flags, architectures or build tags
+      (e.g. -race, GOARCH=386, --tags=dedupelabels) should pass distinct
+      suffixes so each keeps its own warm build cache instead of sharing a
+      single key where only one flavor stays warm.
+    default: ""
   enable_npm:
     description: Whether to enable npm specific features, such as caching.
     default: "false"
@@ -56,15 +64,25 @@ runs:
         sudo rm -rf /usr/local/share/powershell
 
         df -h
+    # Resolve the actual cache paths from the toolchain rather than hardcoding
+    # them. In the golang-builder container GOPATH=/go, so GOMODCACHE is
+    # /go/pkg/mod, which does not match a hardcoded ~/go/pkg/mod.
+    - name: Resolve Go cache paths
+      id: go-cache-paths
+      shell: bash
+      if: ${{ inputs.enable_go == 'true' }}
+      run: |
+        echo "build=$(go env GOCACHE)" >> "$GITHUB_OUTPUT"
+        echo "mod=$(go env GOMODCACHE)" >> "$GITHUB_OUTPUT"
     - uses: actions/cache@cdf6c1fa76f9f475f3d7449005a359c84ca0f306 # v5.0.3
       if: ${{ inputs.enable_go == 'true' }}
       with:
         path: |
-          ~/.cache/go-build
-          ~/go/pkg/mod
-        key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
+          ${{ steps.go-cache-paths.outputs.build }}
+          ${{ steps.go-cache-paths.outputs.mod }}
+        key: ${{ runner.os }}-go-${{ inputs.cache_key_suffix }}-${{ hashFiles('**/go.sum') }}
         restore-keys: |
-          ${{ runner.os }}-go-
+          ${{ runner.os }}-go-${{ inputs.cache_key_suffix }}-
     - uses: actions/cache@cdf6c1fa76f9f475f3d7449005a359c84ca0f306 # v5.0.3
       if: ${{ inputs.enable_npm == 'true' }}
       with:

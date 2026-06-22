@@ -12,7 +12,7 @@ inputs:
       (e.g. -race, GOARCH=386, --tags=dedupelabels) should pass distinct
       suffixes so each keeps its own warm build cache instead of sharing a
       single key where only one flavor stays warm.
-    default: ""
+    default: "default"
   enable_npm:
     description: Whether to enable npm specific features, such as caching.
     default: "false"

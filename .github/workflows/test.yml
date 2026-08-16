@@ -1,0 +1,88 @@
+name: Test action
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  # Seed the cache on a host runner whose installed Go is older than the
+  # go directive of the module under test. Without the fix, "go env" inside
+  # the checkout downloads golang.org/toolchain into GOMODCACHE before the
+  # cache restore step runs.
+  seed:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
+        with:
+          go-version: '1.24.x'
+          cache: false
+      - name: Create test module and promu stub
+        run: |
+          printf 'promu:\n\t@echo promu stub\n' > Makefile
+          mkdir testmod && cd testmod
+          printf 'module example.com/testmod\n\ngo 1.25.0\n' > go.mod
+          printf 'package main\n\nfunc main() {}\n' > main.go
+      - uses: ./
+        with:
+          enable_go: 'true'
+          cache_key_suffix: test-${{ github.run_id }}
+      - name: Populate cache and drop marker
+        run: |
+          cd testmod && go build ./...
+          touch "$(go env GOMODCACHE)/promci-marker"
+
+  # Restore with the exact same key. If the resolve step polluted GOMODCACHE
+  # before the restore, actions/cache downgrades the hit to a miss
+  # ("Cannot open: File exists") and the marker will be missing.
+  verify:
+    needs: seed
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
+        with:
+          go-version: '1.24.x'
+          cache: false
+      - name: Create test module and promu stub
+        run: |
+          printf 'promu:\n\t@echo promu stub\n' > Makefile
+          mkdir testmod && cd testmod
+          printf 'module example.com/testmod\n\ngo 1.25.0\n' > go.mod
+          printf 'package main\n\nfunc main() {}\n' > main.go
+      - uses: ./
+        with:
+          enable_go: 'true'
+          cache_key_suffix: test-${{ github.run_id }}
+      - name: Assert cache was restored intact
+        run: |
+          marker="$(cd "${RUNNER_TEMP}" && go env GOMODCACHE)/promci-marker"
+          if [[ ! -f "${marker}" ]]; then
+            echo "::error::cache restore was downgraded to a miss: ${marker} not found"
+            exit 1
+          fi
+          echo "cache hit confirmed"
+
+  # The golang-builder container has GOPATH=/go and a Go new enough for the
+  # go directive; verify path resolution still works there.
+  container:
+    runs-on: ubuntu-latest
+    container:
+      image: quay.io/prometheus/golang-builder:1.25-base
+    steps:
+      - uses: actions/checkout@v5
+      - name: Create test module and promu stub
+        run: |
+          printf 'promu:\n\t@echo promu stub\n' > Makefile
+          mkdir testmod && cd testmod
+          printf 'module example.com/testmod\n\ngo 1.25.0\n' > go.mod
+          printf 'package main\n\nfunc main() {}\n' > main.go
+      - uses: ./
+        with:
+          enable_go: 'true'
+          cache_key_suffix: test-container-${{ github.run_id }}
+      - name: Assert container cache paths
+        run: |
+          [[ "$(go env GOMODCACHE)" == "/go/pkg/mod" ]] || { echo "::error::unexpected GOMODCACHE"; exit 1; }
+          cd testmod && go build ./...

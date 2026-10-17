@@ -71,7 +71,9 @@ runs:
       id: go-cache-paths
       shell: bash
       if: ${{ inputs.enable_go == 'true' }}
+      # Run outside the checkout so the repository go.mod is not in scope.
       run: |
+        cd "${RUNNER_TEMP}"
         echo "build=$(go env GOCACHE)" >> "$GITHUB_OUTPUT"
         echo "mod=$(go env GOMODCACHE)" >> "$GITHUB_OUTPUT"
     - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
